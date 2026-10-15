@@ -297,15 +297,20 @@ function layoutFingerprint(layout: RackLayout): unknown {
 }
 
 function externalPlacement(options: SvgRenderOptions): SvgExternalPlacement {
-  return options.externalPlacement ?? 'bottom';
+  return options.externalPlacement === 'right' ? 'right' : 'bottom';
 }
 
 function connectionRouting(options: SvgRenderOptions): SvgConnectionRouting {
-  return options.connectionRouting ?? 'direct';
+  const routing = options.connectionRouting;
+  return routing === 'orthogonal' ||
+    routing === 'lanes' ||
+    routing === 'perimeter'
+    ? routing
+    : 'direct';
 }
 
 function connectionColourMode(options: SvgRenderOptions): ConnectionColourMode {
-  return options.connectionColourMode ?? 'auto';
+  return options.connectionColourMode === 'monochrome' ? 'monochrome' : 'auto';
 }
 
 function svgTheme(options: SvgRenderOptions): SvgTheme {
@@ -435,7 +440,14 @@ function resolveConnectionVisualStyle(
   return {
     ...(color === undefined ? {} : { color }),
     colorSource,
-    pattern: portable.pattern ?? (adHoc ? 'dashed' : 'solid'),
+    pattern:
+      portable.pattern === 'solid' ||
+      portable.pattern === 'dashed' ||
+      portable.pattern === 'dotted'
+        ? portable.pattern
+        : adHoc
+          ? 'dashed'
+          : 'solid',
     width: normalizeConnectionWidth(portable.width),
     defaultWidth: !hasExplicitConnectionWidth(portable.width),
     opacity: normalizeConnectionOpacity(portable.opacity),
@@ -453,7 +465,7 @@ function renderConnectionStyleAttributes(
         : 'none';
   const color =
     style.color === undefined ? '' : ` stroke="${escapeXml(style.color)}"`;
-  return ` data-pattern="${style.pattern}" data-colour-source="${style.colorSource}" stroke-width="${formatNumber(style.width)}" stroke-opacity="${formatNumber(style.opacity)}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="${dashArray}"${color}`;
+  return ` data-pattern="${escapeXml(style.pattern)}" data-colour-source="${escapeXml(style.colorSource)}" stroke-width="${formatNumber(style.width)}" stroke-opacity="${formatNumber(style.opacity)}" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="${dashArray}"${color}`;
 }
 
 function rackProjectionKey(rackId: string, face: RackFace): string {
@@ -1231,7 +1243,7 @@ function renderConnection(
     (connection.to.kind === 'device' && connection.to.adHocPort);
   const style = resolveConnectionVisualStyle(connection, adHoc, options);
   const styleAttributes = renderConnectionStyleAttributes(style);
-  const common = `id="${id}" class="rackdown-connection${adHoc ? ' rackdown-connection-ad-hoc' : ''}${style.defaultWidth ? ' rackdown-connection-default-width' : ''}" data-connection-id="${escapeXml(connection.id)}" data-category="${escapeXml(connection.category ?? 'unclassified')}" data-routing="${connection.routing}"${media}${styleAttributes}`;
+  const common = `id="${id}" class="rackdown-connection${adHoc ? ' rackdown-connection-ad-hoc' : ''}${style.defaultWidth ? ' rackdown-connection-default-width' : ''}" data-connection-id="${escapeXml(connection.id)}" data-category="${escapeXml(connection.category ?? 'unclassified')}" data-routing="${escapeXml(connection.routing)}"${media}${styleAttributes}`;
 
   const title = `<title>${escapeXml(connectionTitle(connection, deviceById))}</title>`;
 
@@ -1370,7 +1382,7 @@ function renderExternal(external: ProjectedExternal, id: string): string[] {
       ? ''
       : ` data-target="${escapeXml(external.link.target)}"`;
   return [
-    `<g id="${id}" class="rackdown-external-group" data-external-id="${escapeXml(external.id)}" data-label="${escapeXml(external.label)}" data-link-style="${linkStyle}" data-placement="${external.placement}"${targetAttr}>`,
+    `<g id="${id}" class="rackdown-external-group" data-external-id="${escapeXml(external.id)}" data-label="${escapeXml(external.label)}" data-link-style="${linkStyle}" data-placement="${escapeXml(external.placement)}"${targetAttr}>`,
     `  <title>${escapeXml(external.label)}</title>`,
     `  <rect class="rackdown-external-box" x="${formatNumber(external.xMm)}" y="${formatNumber(external.yMm)}" width="${formatNumber(external.widthMm)}" height="${formatNumber(external.heightMm)}" rx="3" ry="3" />`,
     `  <defs><clipPath id="${id}-label-clip" clipPathUnits="userSpaceOnUse"><rect x="${formatNumber(external.xMm + 4)}" y="${formatNumber(external.yMm + 1)}" width="68.2" height="14" /></clipPath></defs>`,
@@ -1520,7 +1532,7 @@ export function toSvg(
       : '');
   const dimensions = rootDimensionAttributes(viewport, sizing);
   const lines = [
-    `<svg id="${namespace}-root" xmlns="http://www.w3.org/2000/svg"${dimensions} viewBox="${formatNumber(viewport.xMm)} ${formatNumber(viewport.yMm)} ${formatNumber(viewport.widthMm)} ${formatNumber(viewport.heightMm)}" data-external-placement="${placement}" data-connection-routing="${routing}" data-connection-colour-mode="${colourMode}" role="img" aria-labelledby="${namespace}-title" aria-describedby="${namespace}-desc">`,
+    `<svg id="${namespace}-root" xmlns="http://www.w3.org/2000/svg"${dimensions} viewBox="${formatNumber(viewport.xMm)} ${formatNumber(viewport.yMm)} ${formatNumber(viewport.widthMm)} ${formatNumber(viewport.heightMm)}" data-external-placement="${escapeXml(placement)}" data-connection-routing="${escapeXml(routing)}" data-connection-colour-mode="${escapeXml(colourMode)}" role="img" aria-labelledby="${namespace}-title" aria-describedby="${namespace}-desc">`,
     `  <title id="${namespace}-title">${escapeXml(title)}</title>`,
     `  <desc id="${namespace}-desc">${escapeXml(description)}</desc>`,
   ];

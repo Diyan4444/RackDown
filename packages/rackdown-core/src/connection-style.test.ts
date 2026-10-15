@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parse } from './parser.js';
-import { toSvg } from './renderer.js';
+import { type SvgRenderOptions, toSvg } from './renderer.js';
 import { resolve } from './resolver.js';
 
 /** Matches a standalone stroke colour attribute, not stroke-width and friends. */
@@ -39,6 +39,129 @@ const SOURCE = `rack "Rack" 4U
 core:1 -- gateway:1
 gateway:2 -- node:1
 gateway:3 -- [[ISP Handover]]`;
+
+describe('runtime SVG option safety', () => {
+  const invalidValues = [
+    '" onload="alert(1)',
+    '"><script>alert(1)</script><g data-x="&',
+    "' < > &",
+    'unsupported',
+    '',
+    null,
+    42,
+    {},
+  ];
+
+  for (const key of [
+    'externalPlacement',
+    'connectionRouting',
+    'connectionColourMode',
+  ] as const) {
+    it.each(invalidValues)(`${key} falls back safely for %j`, (value) => {
+      const layout = resolve(parse(SOURCE));
+      const options = { namespace: 'runtime-options', [key]: value };
+      const svg = toSvg(layout, options as unknown as SvgRenderOptions);
+
+      expect(svg).not.toMatch(/\sonload\s*=/i);
+      expect(svg).not.toContain('<script>');
+      expect(svg).toBe(toSvg(layout, { namespace: 'runtime-options' }));
+    });
+  }
+
+  for (const adHoc of [false, true]) {
+    for (const perConnection of [false, true]) {
+      it.each(invalidValues)(
+        `rejects pattern %j (adHoc=${adHoc}, perConnection=${perConnection})`,
+        (pattern) => {
+          const layout = resolve(parse(SOURCE));
+          for (const connection of layout.connections) {
+            for (const endpoint of [connection.from, connection.to]) {
+              if (endpoint.kind === 'device') endpoint.adHocPort = adHoc;
+            }
+          }
+          const options = {
+            namespace: 'runtime-patterns',
+            connectionStyle: { pattern: perConnection ? 'dotted' : pattern },
+            ...(perConnection
+              ? {
+                  connectionStyles: Object.fromEntries(
+                    layout.connections.map(({ id }) => [id, { pattern }]),
+                  ),
+                }
+              : {}),
+          };
+          const svg = toSvg(layout, options as unknown as SvgRenderOptions);
+
+          expect(svg).not.toMatch(/\sonload\s*=/i);
+          expect(svg).not.toContain('<script>');
+          expect(connectionTags(svg)).toHaveLength(3);
+          expect(svg).toBe(toSvg(layout, { namespace: 'runtime-patterns' }));
+          expect(connectionTags(svg)[0]).toContain(
+            `data-pattern="${adHoc ? 'dashed' : 'solid'}"`,
+          );
+        },
+      );
+    }
+  }
+
+  it('preserves supported option values and deterministic output', () => {
+    const layout = resolve(parse(SOURCE));
+    for (const externalPlacement of ['bottom', 'right'] as const) {
+      for (const connectionRouting of [
+        'direct',
+        'orthogonal',
+        'lanes',
+        'perimeter',
+      ] as const) {
+        for (const connectionColourMode of ['auto', 'monochrome'] as const) {
+          for (const [pattern, dashArray] of [
+            ['solid', 'none'],
+            ['dashed', '6 4'],
+            ['dotted', '1 4'],
+          ] as const) {
+            const options = {
+              externalPlacement,
+              connectionRouting,
+              connectionColourMode,
+              connectionStyle: { pattern },
+            };
+            const svg = toSvg(layout, options);
+            expect(svg).toBe(toSvg(layout, options));
+            expect(svg).toContain(
+              `data-external-placement="${externalPlacement}"`,
+            );
+            expect(svg).toContain(
+              `data-connection-routing="${connectionRouting}"`,
+            );
+            expect(svg).toContain(
+              `data-connection-colour-mode="${connectionColourMode}"`,
+            );
+            for (const tag of connectionTags(svg)) {
+              expect(tag).toContain(`data-pattern="${pattern}"`);
+              expect(tag).toContain(`stroke-dasharray="${dashArray}"`);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('escapes legitimate author labels exactly once', () => {
+    const layout = resolve(
+      parse(SOURCE.replace('ISP Handover', `ISP "A" & <B> 'C'`)),
+    );
+    const svg = toSvg(layout);
+
+    expect(svg).toContain(
+      'data-label="ISP &quot;A&quot; &amp; &lt;B&gt; &apos;C&apos;"',
+    );
+    expect(svg).toContain(
+      '<title>ISP &quot;A&quot; &amp; &lt;B&gt; &apos;C&apos;</title>',
+    );
+    expect(svg).not.toContain('&amp;quot;');
+    expect(svg).not.toContain('&amp;amp;');
+  });
+});
 
 describe('connection presentation styles', () => {
   it('renders deterministic automatic colours with rounded two-unit strokes by default', () => {
