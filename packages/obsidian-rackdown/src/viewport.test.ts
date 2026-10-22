@@ -73,10 +73,20 @@ describe('viewport lifecycle', () => {
     disconnect = vi.fn();
   });
 
-  function fixture(width = 250) {
+  function fixture(width = 250, rendered = true) {
     const diagram = new TestElement();
-    diagram.clientWidth = width;
+    let contentWidth = width;
+    diagram.clientWidth = Math.round(width);
+    vi.spyOn(diagram, 'getBoundingClientRect').mockImplementation(() => ({
+      left: 0,
+      top: 0,
+      width: rendered ? contentWidth : 0,
+      height: rendered ? 500 : 0,
+    }));
     Object.assign(diagram.ownerDocument.defaultView, {
+      getComputedStyle: () => ({
+        width: `${contentWidth}px`,
+      }),
       ResizeObserver: class {
         constructor(cb: ResizeObserverCallback) {
           callback = cb;
@@ -95,7 +105,9 @@ describe('viewport lifecycle', () => {
       attr: { x: '0', y: '0', width: '500', height: '2000' },
     });
     viewport.setSvg(svg as unknown as SVGSVGElement);
-    const resize = (width: number, height = 500) =>
+    const resize = (width: number, height = 500, liveWidth = width) => {
+      contentWidth = liveWidth;
+      diagram.clientWidth = Math.round(liveWidth);
       callback(
         [
           {
@@ -105,6 +117,7 @@ describe('viewport lifecycle', () => {
         ],
         {} as ResizeObserver,
       );
+    };
     return { diagram, viewport, svg, resize };
   }
 
@@ -116,6 +129,7 @@ describe('viewport lifecycle', () => {
     expect(svg.style.getPropertyValue('width')).toBe('640px');
     expect(svg.style.getPropertyValue('height')).toBe('1760px');
     expect(diagram.querySelector('svg')).toBe(svg);
+    expect(diagram.children).toEqual([svg]);
     const write = vi.spyOn(svg.style, 'setProperty');
     resize(400, 600);
     expect(write).not.toHaveBeenCalled();
@@ -132,6 +146,68 @@ describe('viewport lifecycle', () => {
     expect(svg.style.getPropertyValue('width')).toBe('400px');
     resize(0);
     expect(svg.style.getPropertyValue('width')).toBe('400px');
+    viewport.unload();
+  });
+
+  it.each([0.25, 0.49, 0.75, 235.25, 235.75])(
+    'uses fractional content width %s consistently before and after observation',
+    (width) => {
+      const { svg, viewport, resize } = fixture(width);
+      expect(
+        Number.parseFloat(svg.style.getPropertyValue('width')),
+      ).toBeCloseTo(width * 1.6);
+      const write = vi.spyOn(svg.style, 'setProperty');
+      resize(width);
+      expect(write).not.toHaveBeenCalled();
+      viewport.unload();
+    },
+  );
+
+  it('skips probing a non-rendered container even if its resolved width is positive', () => {
+    const { diagram, svg, resize, viewport } = fixture(250, false);
+    expect(svg.style.getPropertyValue('width')).toBe('800px');
+    expect(diagram.scrollLeft).toBe(0);
+    resize(400);
+    expect(svg.style.getPropertyValue('width')).toBe('800px');
+    expect(diagram.children).toEqual([svg]);
+    viewport.unload();
+  });
+
+  it('recovers from zero width into a visible subpixel pane and preserves later scrolling', () => {
+    const { diagram, svg, resize, viewport } = fixture(0);
+    resize(0.25);
+    expect(Number.parseFloat(svg.style.getPropertyValue('width'))).toBeCloseTo(
+      0.4,
+    );
+    expect(Number.parseFloat(svg.style.getPropertyValue('height'))).toBeCloseTo(
+      1.1,
+    );
+    diagram.scrollLeft = 0.1;
+    resize(0);
+    expect(Number.parseFloat(svg.style.getPropertyValue('width'))).toBeCloseTo(
+      0.4,
+    );
+    resize(250);
+    expect(svg.style.getPropertyValue('width')).toBe('400px');
+    expect(diagram.scrollLeft).toBe(0.1);
+    viewport.unload();
+  });
+
+  it('uses the live gutter width when an observer entry predates scrollbar changes', () => {
+    const { svg, diagram, resize, viewport } = fixture(250.75);
+    diagram.scrollLeft = 25;
+    resize(250.75, 500, 235.75);
+    expect(Number.parseFloat(svg.style.getPropertyValue('width'))).toBeCloseTo(
+      377.2,
+    );
+    expect(Number.parseFloat(svg.style.getPropertyValue('height'))).toBeCloseTo(
+      1037.3,
+    );
+    expect(diagram.scrollLeft).toBe(25);
+    resize(235.75, 100, 250.75);
+    expect(Number.parseFloat(svg.style.getPropertyValue('width'))).toBeCloseTo(
+      401.2,
+    );
     viewport.unload();
   });
 
