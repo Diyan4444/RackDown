@@ -131,13 +131,30 @@ function scanLine(
   return { operators, commentStart: text.length };
 }
 
-/** Recognise connections using the same protected-text rules as endpoint parsing. */
-export function startsWithConnection(text: string): boolean {
-  const operator = scanLine(text).operators[0];
+/** Recognise connections without consuming embedded declaration-token text. */
+export function startsWithConnection(
+  text: string,
+  aliasToken?: { column: number; value: string },
+): boolean {
+  const operators = scanLine(text).operators.filter(
+    (index) =>
+      aliasToken === undefined ||
+      index < aliasToken.column - 1 ||
+      index >= aliasToken.column - 1 + aliasToken.value.length,
+  );
+  if (
+    operators.some(
+      (index) =>
+        (index === 0 || /\s/.test(text[index - 1] ?? '')) &&
+        (index + 2 === text.length || /\s/.test(text[index + 2] ?? '')),
+    )
+  ) {
+    return true;
+  }
+  // Compact operators require a source endpoint, otherwise `--` can belong
+  // to an unquoted rack name, device type or recovered device label.
+  const operator = operators[0];
   if (operator === undefined) return false;
-  // A declaration can contain an invalid alias such as `as core--backup`.
-  // Only give connections priority when the source is an endpoint, not a
-  // declaration prefix. The normal fallback still diagnoses malformed lines.
   const left = text.slice(0, operator).trim();
   if (left.startsWith('"') || left.startsWith('[') || isPlainExternal(left)) {
     return true;
