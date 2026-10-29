@@ -1,6 +1,7 @@
 import { RackDownConnectionViews } from '../src/connection-views.ts';
+import { RackDownNotes } from '../src/notes.ts';
 import { prepareRackDown } from '../src/render-rackdown.ts';
-import { DEFAULT_SETTINGS } from '../src/settings.ts';
+import { DEFAULT_SETTINGS, normalizeSettings } from '../src/settings.ts';
 import { RackDownViewport } from '../src/viewport.ts';
 
 const results = document.querySelector('#results');
@@ -125,31 +126,47 @@ check(
   getComputedStyle(routed.diagram).overflowX === 'auto',
   'overflow is scrollable, not hidden',
 );
-function controlsFixture(width, count) {
+function controlsFixture(
+  width,
+  count,
+  withNotes = false,
+  settings = DEFAULT_SETTINGS,
+) {
   const block = document
     .querySelector('#fixtures')
     .createDiv({ cls: 'rackdown-block' });
   block.style.width = `${width}px`;
   const controls = block.createDiv({ cls: 'rackdown-connection-view' });
   const diagram = block.createDiv({ cls: 'rackdown-diagram' });
-  const source =
+  let source =
     'rack "Lab" 52U\n50 switch "Core" as core\n2 server "Server" as server' +
     Array.from(
       { length: count },
       (_, i) =>
         `\ncore:${i} -- [[Endpoint ${i}]] category ${i % 2 ? 'power' : 'network'}`,
     ).join('');
+  if (withNotes) source += '\nnotes at rear 1 "browser notes"';
+  const prepared = prepareRackDown(source);
   const controller = new RackDownConnectionViews(
     block,
     controls,
     diagram,
-    prepareRackDown(source),
+    prepared,
     { namespace: `toolbar-${width}-${count}` },
-    DEFAULT_SETTINGS,
+    settings,
   );
   controller.load();
   controllers.push({ controller, observer: { disconnect() {} } });
-  return { block, controls, diagram };
+  const notes = new RackDownNotes(
+    block,
+    {},
+    controls,
+    prepared.layout,
+    settings.showNotesButton,
+  );
+  notes.load();
+  controllers.push({ controller: notes, observer: { disconnect() {} } });
+  return { block, controls, diagram, prepared };
 }
 let reservedHeight;
 for (const width of [120, 240.25, 600]) {
@@ -190,22 +207,39 @@ for (const width of [120, 240.25, 600]) {
   diagram.scrollLeft = 20;
   diagram.scrollTop = 100;
   const scroll = [diagram.scrollLeft, diagram.scrollTop];
-  select.value = 'power';
-  select.dispatchEvent(new Event('change'));
-  await frames();
-  const after = diagram.querySelector('.rackdown-rack').getBoundingClientRect();
-  check(
-    Math.abs(after.width - initial.width) < 0.02 &&
-      Math.abs(after.height - initial.height) < 0.02 &&
-      diagram.querySelector('svg').style.width === widthBefore,
-    `${width}px: category switching preserves rack scale`,
-  );
-  check(
-    diagram.scrollLeft === scroll[0] &&
-      diagram.scrollTop === scroll[1] &&
-      diagramOffset() === toolbarTop,
-    `${width}px: category switching preserves scrolling and layout (${diagram.scrollLeft},${diagram.scrollTop} expected ${scroll}; offset ${diagramOffset()} expected ${toolbarTop})`,
-  );
+  const viewBox = diagram.querySelector('svg').getAttribute('viewBox');
+  for (const [view, count] of [
+    ['none', 0],
+    ['power', 2],
+    ['all', 5],
+    ['power', 2],
+  ]) {
+    select.value = view;
+    select.dispatchEvent(new Event('change'));
+    await frames();
+    const after = diagram
+      .querySelector('.rackdown-rack')
+      .getBoundingClientRect();
+    check(
+      Math.abs(after.width - initial.width) < 0.02 &&
+        Math.abs(after.height - initial.height) < 0.02 &&
+        diagram.querySelector('svg').style.width === widthBefore &&
+        diagram.querySelector('svg').getAttribute('viewBox') === viewBox,
+      `${width}px/${view}: switching preserves rack scale and complete viewBox`,
+    );
+    check(
+      diagram.scrollLeft === scroll[0] &&
+        diagram.scrollTop === scroll[1] &&
+        diagramOffset() === toolbarTop,
+      `${width}px/${view}: switching preserves scrolling and layout`,
+    );
+    check(
+      diagram.querySelectorAll('.rackdown-connection').length === count &&
+        controls.querySelector('.rackdown-connection-view-status')
+          .textContent === `Showing ${count} of 5 connections`,
+      `${width}px/${view}: visible paths and count agree`,
+    );
+  }
   check(
     fixtures[1].controls.querySelector('select').value === 'all',
     `${width}px: block selection is independent`,
@@ -230,6 +264,132 @@ for (const width of [120, 240.25, 600]) {
     `${width}px: keyboard focus reveals controls without movement`,
   );
   select.blur();
+}
+
+for (const width of [120, 240.25, 600]) {
+  for (const count of [0, 1, 5]) {
+    const withoutNotes = controlsFixture(width, count);
+    const withNotes = controlsFixture(
+      width,
+      count,
+      true,
+      normalizeSettings({ defaultConnectionView: 'none' }),
+    );
+    const disabledNotes = controlsFixture(
+      width,
+      count,
+      true,
+      normalizeSettings({
+        defaultConnectionView: 'none',
+        showNotesButton: false,
+      }),
+    );
+    await frames();
+    const measure = ({ block, controls, diagram }) => ({
+      height: controls.getBoundingClientRect().height,
+      offset:
+        diagram.getBoundingClientRect().top - block.getBoundingClientRect().top,
+    });
+    const baseline = measure(withoutNotes);
+    const annotated = measure(withNotes);
+    const disabled = measure(disabledNotes);
+    check(
+      disabled.height === baseline.height &&
+        disabled.offset === baseline.offset &&
+        !disabledNotes.controls.querySelector('.rackdown-notes-button') &&
+        !disabledNotes.controls.classList.contains('rackdown-notes-present') &&
+        disabledNotes.prepared.layout.notes.length === 1 &&
+        disabledNotes.controls.scrollWidth <=
+          disabledNotes.controls.clientWidth,
+      `${width}px/${count} routes: disabled Notes keeps data and toolbar space without a button or overflow`,
+    );
+    for (const fixture of [withoutNotes, withNotes, disabledNotes]) {
+      check(
+        getComputedStyle(fixture.controls).gridTemplateRows.split(' ')
+          .length === 2 &&
+          fixture.controls.getBoundingClientRect().height === reservedHeight,
+        `${width}px/${count} routes: toolbar stays at two rows with no third row`,
+      );
+    }
+    check(
+      withNotes.controls.querySelector('.rackdown-notes-button')
+        ?.textContent === 'Notes (1)' &&
+        withNotes.diagram.querySelectorAll('.rackdown-connection').length ===
+          0 &&
+        disabledNotes.diagram.querySelectorAll('.rackdown-connection')
+          .length === 0 &&
+        (count === 0
+          ? !disabledNotes.controls.querySelector('select') &&
+            disabledNotes.controls.querySelector(
+              '.rackdown-connection-view-empty',
+            ).textContent === 'No connections'
+          : disabledNotes.controls.querySelector('select').value === 'none' &&
+            disabledNotes.controls.querySelector(
+              '.rackdown-connection-view-status',
+            ).textContent === `Showing 0 of ${count} connections`),
+      `${width}px/${count} routes: Notes stays independent of None and empty connection collections`,
+    );
+    const button = withNotes.controls.querySelector('.rackdown-notes-button');
+    const primary =
+      withNotes.controls.querySelector('label') ??
+      withNotes.controls.querySelector('.rackdown-connection-view-empty');
+    const status = withNotes.controls.querySelector(
+      '.rackdown-connection-view-status',
+    );
+    check(
+      annotated.height === baseline.height &&
+        annotated.offset === baseline.offset,
+      `${width}px/${count} routes: notes reserve exactly the existing two toolbar rows`,
+    );
+    check(
+      getComputedStyle(button).gridRowStart === '1' &&
+        getComputedStyle(button).gridColumnStart === '2' &&
+        getComputedStyle(primary).gridRowStart === '1' &&
+        (!status || getComputedStyle(status).gridRowStart === '2'),
+      `${width}px/${count} routes: notes stay beside the selector or No connections`,
+    );
+    check(
+      withNotes.controls.scrollWidth <= withNotes.controls.clientWidth,
+      `${width}px/${count} routes: notes toolbar has no horizontal overflow`,
+    );
+  }
+}
+
+for (const [view, expected] of [
+  ['all', 5],
+  ['none', 0],
+  ['network', 3],
+  ['power', 2],
+  ['console', 0],
+  ['unclassified', 0],
+]) {
+  const fixture = controlsFixture(
+    120,
+    5,
+    true,
+    normalizeSettings({ defaultConnectionView: view }),
+  );
+  await frames();
+  const select = fixture.controls.querySelector('select');
+  check(
+    select.value === view &&
+      Array.from(select.options, ({ textContent }) => textContent).join(',') ===
+        'All,None,Network,Power,Console,Unclassified' &&
+      fixture.diagram.querySelectorAll('.rackdown-connection').length ===
+        expected &&
+      fixture.controls.querySelector('.rackdown-connection-view-status')
+        .textContent === `Showing ${expected} of 5 connections` &&
+      fixture.controls.querySelector('.rackdown-notes-button').textContent ===
+        'Notes (1)',
+    `120px/${view}: saved default uses six ordered choices with independent Notes`,
+  );
+  check(
+    fixture.controls.scrollWidth <= fixture.controls.clientWidth &&
+      fixture.controls.getBoundingClientRect().height === reservedHeight &&
+      getComputedStyle(fixture.controls).gridTemplateRows.split(' ').length ===
+        2,
+    `120px/${view}: default view has no overflow or third toolbar row`,
+  );
 }
 
 const count = messages.filter((message) => message.startsWith('FAIL')).length;
