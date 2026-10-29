@@ -16,13 +16,15 @@ power:1 -- host:power1 category power
 core:2 -- [[Infrastructure/Racks/Upstream]]
 ```
 
-## Example
+## Example diagram
+
+The image below is a separate example, rendered from [`examples/3-node-shelf.rackdown`](examples/3-node-shelf.rackdown). It is **not** the output of the introductory `Example Rack` source shown above.
 
 <a href="examples/generated/3-node-shelf.png">
-  <img src="examples/generated/3-node-shelf.png" alt="RackDown diagram of a three-node cluster on a shelf" width="450">
+  <img src="examples/generated/3-node-shelf.png" alt="Rendered RackDown example of a three-node cluster on a shelf; source: examples/3-node-shelf.rackdown" width="450">
 </a>
 
-Explore the [`examples/`](examples/) directory for rack layouts, clusters, connections and shared rows.
+Explore the [`examples/`](examples/) directory for the source and generated diagrams for rack layouts, clusters, connections and shared rows.
 
 ## What it supports
 

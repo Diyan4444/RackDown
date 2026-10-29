@@ -97,7 +97,7 @@ The embedded stylesheet reads CSS custom properties for colours, typography and 
 
 Connection elements include `.rackdown-connection` and data hooks such as `data-connection-id`, `data-routing`, `data-pattern`, `data-colour-source` and optional `data-media`. Hosts may add hover emphasis with CSS; core does not embed hover-interaction rules.
 
-For a complete hook list and exact styling precedence, consult the renderer implementation and the [specification](../../docs/specification.md). Under `theme: 'none'`, core emits no stylesheet, so the host must define all presentation rules itself.
+For the complete SVG data-hook table, CSS custom-property reference, connection-width precedence, hover styling, theme behaviour, sizing modes and accessibility markup, see the [SVG rendering and host integration reference](../../docs/svg-rendering-and-host-integration.md). The [specification](../../docs/specification.md) documents source-language behaviour, not the complete SVG hook list. Under `theme: 'none'`, core emits no stylesheet, so the host must define all presentation rules itself.
 
 ## Boundaries
 
